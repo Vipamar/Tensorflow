@@ -1,0 +1,159 @@
+#We are going to build a linear model from scratch using Tensorflow and then see how our model stacks up with a scikit learn model
+
+import pandas as pd # for doing eploratory data analysis
+import seaborn as sns # statistical visualization
+import matplotlib.pyplot as plt
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior() 
+from sklearn import model_selection
+import numpy as np
+# to make graphics inline
+%matplotlib inline 
+sns.set()
+
+from sklearn.datasets import load_boston
+boston_data = load_boston()
+print(boston_data.keys())
+
+boston_data.feature_names
+
+boston_data.DESCR
+
+df = pd.DataFrame(boston_data.data, columns=boston_data.feature_names)
+df['target'] = boston_data.target
+
+df.shape[0]
+
+#create a panda Series of size df.shape[0]  with value 1 and name CONST
+const_df = pd.Series(np.ones(df.shape[0]))
+
+df = pd.concat([const_df, df], axis=1) # adding 1 to all the observations
+df = df.rename(columns={0:"CONST"})
+
+print(df.shape)
+df.head()
+
+# summary
+df.describe()
+
+# just to make sure values in different columns are not missing
+df.isnull().any()
+
+# Making sure datatype is also good, so that relevant algebra on columns make sense
+df.dtypes
+
+from sklearn.model_selection import  train_test_split
+validation_size = 0.40
+seed = 3
+train_df, valid_test_df = train_test_split(df, test_size=validation_size, random_state=seed)
+valid_df, test_df = train_test_split(valid_test_df, test_size=.5, random_state=seed)
+
+train_df.shape, valid_test_df.shape, valid_df.shape, test_df.shape
+
+train_df.head()
+
+#In machine learning we would like uncorrelated features. Let see how our attribute/features are correlated
+train_df.corr()
+
+fig, ax = plt.subplots(figsize=(14,14)) 
+sns.heatmap(train_df.corr(), annot=True, ax=ax)
+plt.show()
+
+train_df.columns
+
+# We are doing random selection
+selected_feature =['CONST', 'CRIM', 'INDUS', 'NOX', 'DIS', 'RAD', 'TAX','PTRATIO', 'B', 'LSTAT']
+X_train = train_df[selected_feature].values
+y_train = train_df['target'].values
+X_valid = valid_df[selected_feature].values
+y_valid = valid_df['target'].values.reshape((-1,1))
+X_test =  test_df[selected_feature].values
+y_test = test_df['target'].values.reshape((-1,1))
+train_df.head()
+
+X_train[0:3,:], y_train[0:3] 
+
+X = tf.placeholder(tf.float32, shape= X_train.shape, name='input_training_features')
+y = tf.placeholder(tf.float32, shape = y_train.shape, name = 'y_i')
+l = tf.placeholder(tf.float32, shape= [], name='regularization_weight')
+
+X.shape, y.shape, l.shape
+
+y_train.shape
+
+temp = tf.multiply(l, tf.eye(X_train.shape[1])) + tf.matmul(tf.transpose(X), X)
+
+temp.shape
+
+temp_ridge = tf.matmul(tf.linalg.inv(temp), tf.transpose(X))
+print(temp_ridge.shape)
+
+ridge_weights = tf.matmul(temp_ridge, tf.expand_dims(y,1))
+print(ridge_weights.shape)
+
+lambdas = [1e-20, 1e-10, 1e-5, 1e-4, 1e-3,1e-1, 1, 5.0, 10, 50, 100]
+print(lambdas)
+print(type(lambdas[0]))
+
+ind =['lambda_{}'.format(la) for la in lambdas]
+column_names = ['lambda', 'mse']+ ['w_{}'.format(i) for i in range(X_train.shape[1])]
+print(ind)
+print(column_names)
+coeff_matrix = pd.DataFrame(index=ind, columns=column_names, dtype=np.float32)
+
+coeff_matrix.dtypes
+
+coeff_matrix.head()
+# we haven't filled values in different columns.  NaN is ok
+
+with tf.Session() as sess:
+    for i, reg in enumerate(lambdas):
+        # running the graph and feeding actual data
+        ridge_weight_value = sess.run(ridge_weights, feed_dict={X:X_train, y:y_train, l:reg})
+        # Let's evaluate the performance using MSE on y_valid, y_valid_prediction data
+        #print(ridge_weight_value)
+        y_valid_pred= np.dot(X_valid, ridge_weight_value)
+        # See how we can evaluate l_2 norm in numpy
+        mse = (np.linalg.norm(y_valid - y_valid_pred ,ord=2)/(len(y_valid)))**2
+        coeff_matrix.iloc[i, 0] = reg
+        coeff_matrix.iloc[i, 1] = mse
+        print(mse)
+        coeff_matrix.iloc[i, 2:] = ridge_weight_value.T
+    
+    
+y_valid.shape, y_valid_pred.shape, ridge_weight_value.shape, X_valid.shape
+
+coeff_matrix
+
+selected_index = 'lambda_1e-05'
+
+# Lets look at what would have happened if you choose the average of y_valid for prediction
+
+mean_val = np.mean(y_valid, axis=0)
+print(mean_val)
+
+# This would have been our MSE in this base scenario
+
+np.linalg.norm(y_valid -mean_val, ord=2)**2/len(y_valid)
+
+# Let see how well we did on truly unseen data(never touched during building model)
+
+selected_weights =  coeff_matrix.loc[selected_index,'w_0':].values.reshape((-1,1))
+y_test_pred= np.dot(X_test, selected_weights)
+print(y_test_pred.shape, y_test.shape)
+print(type(y_test_pred), type(y_test))
+test_mse = np.linalg.norm(y_test - y_test_pred ,ord=2)**2/(len(y_test))
+
+test_mse
+
+# Now to compare our results with sklearn
+
+from sklearn.linear_model import Ridge
+regressor = Ridge(alpha = [1e-05], normalize = False)
+regressor.fit(X_train, y_train)
+y_pred = np.array([regressor.predict(X_test)]).T
+test_mse = np.linalg.norm(y_test - y_pred ,ord=2)**2/(len(y_test))
+print(test_mse)
+
+
+
